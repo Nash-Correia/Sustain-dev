@@ -1,0 +1,267 @@
+from rest_framework import serializers
+from .models import Note, Report, UserReport, Company, Fund, UserCompany, CustomUser,PurchaseLog,Portfolio, PortfolioCompany
+from .models import Tag, Article 
+import json
+
+class UserSerializer(serializers.ModelSerializer):
+    """Serializer for CustomUser model with profile fields built-in"""
+    email = serializers.EmailField(required=True)
+    
+    class Meta:
+        model = CustomUser
+        fields = [
+            "username", "email", "password", "first_name", "last_name", 
+            "phone_number", "organization", "job_title", "bio",
+            "subscription_type", "is_verified"
+        ]
+        extra_kwargs = {"password": {'write_only': True}}
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        
+        user = CustomUser.objects.create(**validated_data)
+        user.set_password(password)
+        user.save()
+        
+        return user
+
+    def update(self, instance, validated_data):
+        # Update user fields
+        for attr, value in validated_data.items():
+            if attr == 'password':
+                instance.set_password(value)
+            else:
+                setattr(instance, attr, value)
+        instance.save()
+        
+        return instance
+
+class UserDetailSerializer(serializers.ModelSerializer):
+    """Serializer for user details (without password)"""
+    
+    class Meta:
+        model = CustomUser
+        fields = [
+            "username", "email", "first_name", "last_name", "date_joined", 
+            "is_staff", "is_superuser", "phone_number", "organization", 
+            "job_title", "bio", "subscription_type", "is_verified", "last_login"
+        ]
+
+class NoteSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source='author.username', read_only=True)
+
+    class Meta:
+        model = Note
+        fields = ["id", "title", "content", "created_at", "author_name"]
+        extra_kwargs = {"author": {"read_only": True}}
+
+class ReportSerializer(serializers.ModelSerializer):
+    """Serializer for Report model"""
+    class Meta:
+        model = Report
+        fields = ["id", "company_name", "sector", "year", "rating", "report_url", "report_file", "created_at", "is_active"]
+
+class UserReportSerializer(serializers.ModelSerializer):
+    """Serializer for UserReport model"""
+    report = ReportSerializer(read_only=True)
+    report_id = serializers.IntegerField(write_only=True)
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    assigned_by_username = serializers.CharField(source='assigned_by.username', read_only=True)
+    
+    class Meta:
+        model = UserReport
+        fields = ["id", "report", "report_id", "user_username", "assigned_by_username", "assigned_at", "notes"]
+
+class UserReportsListSerializer(serializers.ModelSerializer):
+    """Simplified serializer for listing user's reports"""
+    company_name = serializers.CharField(source='report.company_name', read_only=True)
+    sector = serializers.CharField(source='report.sector', read_only=True)
+    year = serializers.IntegerField(source='report.year', read_only=True)
+    rating = serializers.CharField(source='report.rating', read_only=True)
+    report_url = serializers.URLField(source='report.report_url', read_only=True)
+    report_file = serializers.FileField(source='report.report_file', read_only=True)
+    
+    class Meta:
+        model = UserReport
+        fields = ["id", "company_name", "sector", "year", "rating", "report_url", "report_file", "assigned_at"]
+
+class CompanySerializer(serializers.ModelSerializer):
+    """Serializer for Company model"""
+    class Meta:
+        model = Company
+        fields = [
+            "isin", "company_name", "sector", "esg_sector", "bse_symbol", "nse_symbol",
+            "market_cap", "e_score", "s_score", "g_score", "esg_score", "composite", 
+            "grade", "positive", "negative", "controversy", "created_at", "updated_at"
+        ]
+
+class UserCompanySerializer(serializers.ModelSerializer):
+    """Serializer for UserCompany model"""
+    company = CompanySerializer(read_only=True)
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    assigned_by_username = serializers.CharField(source='assigned_by.username', read_only=True)
+    
+    class Meta:
+        model = UserCompany
+        fields = [
+            "id", "user", "company", "user_username", "assigned_by_username", 
+            "assigned_at", "is_active", "notes"
+        ]
+
+class MyReportsSerializer(serializers.ModelSerializer):
+    """Serializer for user's assigned companies in My Reports"""
+    company_name = serializers.CharField(source='company.company_name', read_only=True)
+    sector = serializers.CharField(source='company.sector', read_only=True)  # Changed from SerializerMethodField
+    esg_sector = serializers.CharField(source='company.esg_sector', read_only=True)  # Keep esg_sector separate
+    esg_rating = serializers.CharField(source='company.esg_rating', read_only=True)  # Changed from SerializerMethodField
+    isin = serializers.CharField(source='company.isin', read_only=True)
+    report_filename = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+    
+    def get_report_filename(self, obj):
+        """Get the PDF filename from database"""
+        return obj.company.pdf_filename if obj.company.has_pdf_report else None
+    
+    def get_download_url(self, obj):
+        """Get the secure download URL for this company's report"""
+        if obj.company.has_pdf_report and obj.company.pdf_filename:
+            return f"/api/reports/download/{obj.company.company_name}/"
+        return None
+    
+    class Meta:
+        model = UserCompany
+        fields = [
+            "id", "isin", "company_name", "sector", "esg_sector", "esg_rating", 
+            "assigned_at", "notes", "report_filename", "download_url"
+        ]
+
+class FundSerializer(serializers.ModelSerializer):
+    """Serializer for Fund model"""
+    class Meta:
+        model = Fund
+        fields = ["id", "fund_name", "score", "percentage", "grade", "created_at", "updated_at"]
+
+class CompanyListSerializer(serializers.ModelSerializer):
+    """Serializer for Company listing - supports both ESG Reports and Comparison Tool"""
+    has_pdf_report = serializers.SerializerMethodField()
+    
+    def get_has_pdf_report(self, obj):
+        """Check if company has a PDF report available for download"""
+        return bool(obj.pdf_filename and obj.pdf_filename.strip())
+    
+    class Meta:
+        model = Company
+        fields = [
+            "isin", "company_name", "sector", "esg_sector", "esg_rating", "grade",
+            "pdf_filename", "has_pdf_report"
+        ]
+
+class PurchaseLogSerializer(serializers.ModelSerializer):
+    # Pull user details from the related CustomUser model
+    username = serializers.CharField(source='user.username', read_only=True)
+    first_name = serializers.CharField(source='user.first_name', read_only=True)
+    last_name = serializers.CharField(source='user.last_name', read_only=True)
+    organization = serializers.CharField(source='user.organization', read_only=True)
+    job_title = serializers.CharField(source='user.job_title', read_only=True)
+    email = serializers.EmailField(source='user.email', read_only=True)
+    user_id_recorded = serializers.IntegerField(source='user.id', read_only=True)
+    phone_number = serializers.CharField(source='user.phone_number', read_only=True)
+    #company_name = serializers.CharField('company_name', read_only=True)
+    # company_isin = serializers.CharField(source='company.isin', read_only=True)
+
+
+    class Meta:
+        model = PurchaseLog
+        fields = (
+            'id',
+            'user', # Foreign Key ID
+            'username', 
+            'user_id_recorded',
+            'first_name',
+            'last_name',
+            'organization',
+            'job_title',
+            'timestamp',
+            'company_name',
+            'phone_number',      
+            'email', 
+            # 'company_isin', # Optional
+        )
+        read_only_fields = fields # Make all fields read-only in this context
+
+
+
+class TagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tag
+        fields = ['name', 'slug']
+
+class ArticleSerializer(serializers.ModelSerializer):
+    tags = TagSerializer(many=True, read_only=True)
+    # Format the date nicely
+    publication_date = serializers.DateField(format="%d %B, %Y") 
+    main_image = serializers.ImageField(use_url=True, required=False)
+
+    class Meta:
+        model = Article
+        fields = [
+            'id', 'title', 'slug', 'category', 
+            'publication_date', 'main_image','content', 'tags', 'external_link'
+        ]
+
+class PortfolioCompanySerializer(serializers.ModelSerializer):
+    company_name = serializers.ReadOnlyField(source='company.company_name')
+    isin = serializers.ReadOnlyField(source='company.isin')
+    esg_composite = serializers.ReadOnlyField(source='company.esg_score')
+    esg_rating = serializers.ReadOnlyField(source='company.grade')
+
+    class Meta:
+        model = PortfolioCompany
+        fields = ('id', 'company_name', 'isin', 'aum_value', 'esg_composite', 'esg_rating')
+
+class PortfolioSerializer(serializers.ModelSerializer):
+    companies = PortfolioCompanySerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Portfolio
+        fields = ('id', 'name', 'companies')
+
+class PortfolioCompanyInputSerializer(serializers.Serializer):
+    """Serializer for handling incoming company lists (ISIN or name) with AUM."""
+    companies_data = serializers.CharField(
+        help_text="JSON string containing list of company data. E.g., [{'isin': 'INE001A01018', 'aum': 100.0}, ...]"
+    )
+    name = serializers.CharField(
+        max_length=255, 
+        help_text="Name of the portfolio (e.g., 'Portfolio 1')"
+    )
+    
+    def validate_companies_data(self, value):
+        try:
+            data = json.loads(value)
+            if not isinstance(data, list):
+                raise serializers.ValidationError("Input must be a JSON list.")
+            
+            # Simple check for required fields in the list items
+            for item in data:
+                if not isinstance(item, dict) or not ('id_key' in item and 'aum' in item):
+                    raise serializers.ValidationError("Each item must be an object with 'id_key' (ISIN/Name) and 'aum'.")
+                
+        except json.JSONDecodeError:
+            raise serializers.ValidationError("Invalid JSON format.")
+        return data
+
+class PortfolioCompanySerializer(serializers.ModelSerializer):
+    company_name = serializers.ReadOnlyField(source='company.company_name')
+    isin = serializers.ReadOnlyField(source='company.isin')
+    
+    # --- FIX 1: Explicitly define fields as FloatField for type safety ---
+    esg_composite = serializers.FloatField(source='company.esg_score', read_only=True)
+    esg_rating = serializers.ReadOnlyField(source='company.grade')
+
+    # FIX 2: Explicitly define AUM as FloatField
+    aum_value = serializers.FloatField(required=False, allow_null=True)
+
+    class Meta:
+        model = PortfolioCompany
+        fields = ('id', 'company_name', 'isin', 'aum_value', 'esg_composite', 'esg_rating')

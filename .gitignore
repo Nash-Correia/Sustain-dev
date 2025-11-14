@@ -1,0 +1,8 @@
+/deploy
+
+
+.env.*
+
+
+
+postgres_data/

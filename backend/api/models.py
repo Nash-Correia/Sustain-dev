@@ -1,0 +1,334 @@
+from django.db import models
+from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.core.exceptions import ValidationError
+from django.conf import settings 
+from django.utils import timezone
+from django.utils.text import slugify
+
+class CaseInsensitiveUsernameValidator(UnicodeUsernameValidator):
+    """Username validator that ensures case-insensitive uniqueness"""
+    pass
+
+
+class CustomUser(AbstractUser):
+    """
+    Custom User model with case-insensitive username and standard id primary key
+    """
+    # Override username to be case-insensitive and unique (but not primary key)
+    username = models.CharField(
+        'Username',
+        max_length=150,
+        unique=True,  # Keep unique but not primary key
+        help_text='Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.',
+        validators=[CaseInsensitiveUsernameValidator()],
+        error_messages={
+            'unique': "A user with that username already exists.",
+        },
+    )
+    
+    # Make email required and unique
+    email = models.EmailField(
+        'Email address',
+        unique=True,
+        help_text='Required. Enter a valid email address.'
+    )
+    
+    # Enhanced profile fields (consolidated from UserProfile)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    organization = models.CharField(max_length=100, blank=True, null=True)
+    job_title = models.CharField(max_length=100, blank=True, null=True)
+    bio = models.TextField(blank=True, null=True)
+    
+    # User subscription/access fields
+    subscription_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('free', 'Free'),
+            ('basic', 'Basic'),
+            ('premium', 'Premium'),
+            ('enterprise', 'Enterprise'),
+        ],
+        default='free'
+    )
+    subscription_expires = models.DateTimeField(null=True, blank=True)
+    is_verified = models.BooleanField(default=False)
+    
+    # Login tracking
+    failed_login_attempts = models.IntegerField(default=0)
+    last_failed_login = models.DateTimeField(null=True, blank=True)
+    is_locked = models.BooleanField(default=False)
+    
+    class Meta:
+        verbose_name = 'User'
+        verbose_name_plural = 'Users'
+        ordering = ['username']
+    
+    def save(self, *args, **kwargs):
+        # Convert username to lowercase for case-insensitive storage
+        if self.username:
+            self.username = self.username.lower().strip()
+        
+        # Convert email to lowercase
+        if self.email:
+            self.email = self.email.lower().strip()
+            
+        super().save(*args, **kwargs)
+    
+    def clean(self):
+        super().clean()
+        
+        # Check for case-insensitive username uniqueness
+        if self.username:
+            username_lower = self.username.lower().strip()
+            existing_user = CustomUser.objects.filter(
+                username__iexact=username_lower
+            ).exclude(pk=self.pk).first()
+            
+            if existing_user:
+                raise ValidationError({
+                    'username': 'A user with that username already exists (case-insensitive).'
+                })
+    
+    def __str__(self):
+        return self.username
+    
+    @property
+    def full_name(self):
+        """Return the user's full name."""
+        return f"{self.first_name} {self.last_name}".strip() or self.username
+
+class Company(models.Model):
+    """Company ESG data from Excel sheet - All fields as text to avoid type issues"""
+    isin = models.CharField(max_length=14, primary_key=True)  # ISIN as primary key (text)
+    company_name = models.CharField(max_length=200, blank=True, null=True)  # Increased length
+    
+    # Basic company info from Excel
+    bse_symbol = models.CharField(max_length=50, blank=True, null=True)  # BSE Symbol
+    nse_symbol = models.CharField(max_length=50, blank=True, null=True)  # NSE Symbol
+    sector = models.CharField(max_length=100, blank=True, null=True)  # Sector
+    industry = models.CharField(max_length=100, blank=True, null=True)  # Industry
+    esg_sector = models.CharField(max_length=100, blank=True, null=True)  # ESG Sector from Excel
+    market_cap = models.CharField(max_length=50, blank=True, null=True)  # Mcap as text
+    
+    # ESG Scores - all as text to avoid conversion issues
+    e_pillar = models.CharField(max_length=20, blank=True, null=True)  # E Pillar
+    s_pillar = models.CharField(max_length=20, blank=True, null=True)  # S Pillar  
+    g_pillar = models.CharField(max_length=20, blank=True, null=True)  # G Pillar
+    esg_pillar = models.CharField(max_length=20, blank=True, null=True)  # ESG Pillar
+    
+    # Screening & Ratings - all as text
+    positive_screen = models.CharField(max_length=50, blank=True, null=True)  # Positive Screen
+    negative_screen = models.CharField(max_length=50, blank=True, null=True)  # Negative Screen
+    controversy_rating = models.CharField(max_length=50, blank=True, null=True)  # Controversy Rating
+    composite_rating = models.CharField(max_length=50, blank=True, null=True)  # Composite Rating
+    esg_rating = models.CharField(max_length=10, blank=True, null=True)  # ESG Rating (grade)
+    
+    # PDF File Information
+    pdf_filename = models.CharField(max_length=200, blank=True, null=True)  # Matched PDF filename
+    has_pdf_report = models.BooleanField(default=False)  # Whether PDF exists for this company
+    
+    # Excel raw data (for debugging and future use)
+    sr_no = models.CharField(max_length=10, blank=True, null=True)  # Sr No. from Excel
+    
+    # Legacy fields (for backward compatibility)
+    grade = models.CharField(max_length=4, blank=True, null=True)  # Maps to esg_rating
+    e_score = models.CharField(max_length=20, blank=True, null=True)  # Maps to e_pillar
+    s_score = models.CharField(max_length=20, blank=True, null=True)  # Maps to s_pillar
+    g_score = models.CharField(max_length=20, blank=True, null=True)  # Maps to g_pillar
+    esg_score = models.CharField(max_length=20, blank=True, null=True)  # Maps to esg_pillar
+    positive = models.CharField(max_length=15, blank=True, null=True)  # Maps to positive_screen
+    negative = models.CharField(max_length=15, blank=True, null=True)  # Maps to negative_screen
+    controversy = models.CharField(max_length=15, blank=True, null=True)  # Maps to controversy_rating
+    composite = models.CharField(max_length=20, blank=True, null=True)  # Maps to composite_rating
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.company_name} ({self.isin})"
+
+    class Meta:
+        verbose_name_plural = "Companies"
+        ordering = ['company_name']
+
+class UserCompany(models.Model):
+    """Track which companies are assigned to which users by admins"""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='assigned_companies')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='assigned_users')
+    assigned_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, related_name='company_assignments_made')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, null=True)  # Admin notes about the assignment
+
+    class Meta:
+        unique_together = ('user', 'company')  # Prevent duplicate assignments
+        ordering = ['-assigned_at']
+        verbose_name = "User Company Assignment"
+        verbose_name_plural = "User Company Assignments"
+
+    def __str__(self):
+        return f"{self.user.username} - {self.company.company_name}"
+
+class Fund(models.Model):
+    """Fund data from Excel sheet"""
+    fund_name = models.CharField(max_length=200, unique=True)
+    score = models.FloatField(null=True, blank=True)
+    percentage = models.CharField(max_length=20, blank=True, null=True)
+    grade = models.CharField(max_length=10, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.fund_name
+
+    class Meta:
+        ordering = ['fund_name']
+
+class Report(models.Model):
+    """ESG Reports available in the system"""
+    company_name = models.CharField(max_length=200)
+    sector = models.CharField(max_length=100, blank=True, null=True)
+    year = models.IntegerField()
+    rating = models.CharField(max_length=10)  # A+, B, C+, etc.
+    report_url = models.URLField(blank=True, null=True)
+    report_file = models.FileField(upload_to='reports/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.company_name} - {self.year}"
+
+    class Meta:
+        ordering = ['-year', 'company_name']
+        unique_together = ['company_name', 'year']
+
+class UserReport(models.Model):
+    """Tracks which reports a user owns/has access to"""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='owned_reports')
+    report = models.ForeignKey(Report, on_delete=models.CASCADE, related_name='owners')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_reports')
+    notes = models.TextField(blank=True, null=True)  # Admin notes
+
+    def __str__(self):
+        return f"{self.user.username} - {self.report}"
+
+    class Meta:
+        unique_together = ['user', 'report']
+        ordering = ['-assigned_at']
+
+class Note(models.Model):
+    title = models.CharField(max_length=100)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    author = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="notes")
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        ordering = ['-created_at']
+
+class PurchaseLog(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, # Keep log even if user is deleted
+        null=True, # Allow logs for potentially deleted users
+        related_name='purchase_logs'
+    )
+    # Store user details at the time of purchase, in case user profile changes later
+    user_id_recorded = models.IntegerField(null=True, blank=True) # Store ID explicitly
+    #first_name = models.CharField(max_length=150, blank=True)
+    #last_name = models.CharField(max_length=150, blank=True)
+    #organization = models.CharField(max_length=255, blank=True)
+    #job_title = models.CharField(max_length=255, blank=True)
+    company_name = models.CharField(max_length=255, blank=True, help_text="Name of the company report purchased/requested")
+    # Consider adding info about *what* was purchased if needed (e.g., company ISIN)
+    # company_isin = models.CharField(max_length=50, blank=True)
+    #phone_number = models.CharField(max_length=32, blank=True, default='')
+    #email = models.EmailField(blank=True, null=True)
+    timestamp = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        username = self.user.username if self.user else f"Deleted User (ID: {self.user_id_recorded})"
+        company_info = f" for {self.company_name}" if self.company_name else ""
+        return f"Purchase by {username}{company_info} at {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
+    class Meta:
+        ordering = ['-timestamp'] # Show newest logs first
+        verbose_name = "Purchase Log Entry"
+        verbose_name_plural = "Purchase Log Entries"
+
+
+
+
+# A new model for Tags
+class Tag(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=100, unique=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+# The main model for your articles
+class Article(models.Model):
+    CATEGORY_CHOICES = [
+        ('INSTITUTIONAL_EYE', 'Institutional Eye'),
+        ('SPECIALS', 'Specials'),
+    ]
+
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, db_index=True)
+    title = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True, blank=True, help_text="A unique URL-friendly version of the title. Will be auto-generated.")
+    main_image = models.ImageField(upload_to='article_images/', blank=True, null=True, help_text="Upload a main image for the article card.")
+    publication_date = models.DateField(default=timezone.now)
+    content = models.TextField(help_text="The main content of the article. You can use HTML.")
+    tags = models.ManyToManyField(Tag, blank=True, help_text="Select or create tags for this article.")
+    external_link = models.URLField(blank=True, null=True, help_text="Optional: Use for the 'Read our blog here' link.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-publication_date'] # Show newest first
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+    
+
+class Portfolio(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='portfolios')
+    name = models.CharField(max_length=255)
+    # Portfolio name must be unique for a given user (e.g., a user can't have two "Portfolio 1"s)
+    
+    class Meta:
+        unique_together = ('user', 'name')
+
+    def __str__(self):
+        return f"{self.user.username}'s {self.name}"
+
+class PortfolioCompany(models.Model):
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name='companies')
+    # Link to the main Company data for ratings, etc.
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+    
+    # Custom AUM field for this specific portfolio holding
+    aum_value = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('portfolio', 'company')
+        verbose_name_plural = 'Portfolio Holdings'
+
+    def __str__(self):
+        return f"{self.portfolio.name} - {self.company.company_name}"

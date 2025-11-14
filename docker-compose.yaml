@@ -1,0 +1,73 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: sustain_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - sustain-net
+
+  backend:
+    # Build from local 'backend' folder
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sustain_backend
+    restart: unless-stopped
+    # Pass all variables from .env file to the container
+    environment:
+      DEBUG: ${DEBUG}
+      SECRET_KEY: ${SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME}
+      AWS_S3_REGION_NAME: ${AWS_S3_REGION_NAME}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - sustain-net
+
+  frontend:
+    # Build from local 'frontend' folder
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # --- THIS IS THE FIX for the "not set" error ---
+      # This passes the variable to the Next.js build process
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    # --- END OF FIX ---
+    container_name: sustain_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # This provides the variable at runtime (good to have both)
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_WEB3FORMS_KEY: 3fe31dbc-b6ee-4ce4-a9fe-5f54d6948641
+    depends_on:
+      - backend
+    networks:
+      - sustain-net
+
+networks:
+  sustain-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
