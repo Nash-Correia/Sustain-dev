@@ -1,4 +1,3 @@
-
 // FILE: components/portfolio/PortfolioTabs.tsx
 import React from 'react';
 
@@ -18,8 +17,9 @@ const PortfolioTabs: React.FC<PortfolioTabsProps> = ({
       {portfolioNames.map(name => (
         <button
           key={name}
+          type="button" // Fix for unexpected page reload
           onClick={() => onPortfolioChange(name)}
-          className={`flex-1 px-6 py-3 rounded-xl font-medium transition-all duration-300 ${
+          className={`w-1/3 px-6 py-3 rounded-xl font-medium transition-all duration-300 ${ // <-- CHANGED: Replaced 'flex-1' with 'w-1/3'
             activePortfolioName === name
               ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg shadow-green-200'
               : 'text-slate-600 hover:bg-slate-50'

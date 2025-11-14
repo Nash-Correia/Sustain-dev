@@ -104,7 +104,7 @@ export interface PortfolioHolding {
     company_name: string;
     isin: string;
     aum_value: number | null;
-    esg_composite: number | null;
+    esg_composite: number |string | null;
     esg_rating: string | null;
 }
 

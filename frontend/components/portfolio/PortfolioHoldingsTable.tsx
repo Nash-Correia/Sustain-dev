@@ -1,30 +1,21 @@
-
 // FILE: components/portfolio/PortfolioHoldingsTable.tsx
-import React from "react";
-import { Edit, Save, Trash2, PieChart } from "lucide-react";
-import type { PortfolioHolding } from "../../lib/auth";
-import { getEsgCompositeAsNumber } from "./portfolioUtils";
+import React from 'react';
+import { Loader2, Trash2, Edit, Save, X } from 'lucide-react';
+import { type PortfolioHolding } from '../../lib/auth';
+import Button from '../ui/Button';
+import Input from '../ui/Input';
+import PortfolioTotals from './PortfolioTotals';
 
-export interface PortfolioHoldingsTableProps {
+interface PortfolioHoldingsTableProps {
   activePortfolioName: string;
   currentHoldings: PortfolioHolding[];
   isEditing: boolean;
   onAUMChange: (id: number, value: string) => void;
-  onRemoveHolding: (holdingId: number) => void;
+  onRemoveHolding: (holdingId: number) => Promise<void>;
   onEditToggle: () => void;
-  onSaveEdit: () => void;
+  onSaveEdit: () => Promise<void>;
   onCancelEdit: () => void;
 }
-
-const ratingColors: Record<string, string> = {
-  "A+": "bg-rating-a-plus",
-  "A": "bg-rating-a",
-  "B+": "bg-rating-b-plus",
-  "B": "bg-rating-b",
-  "C+": "bg-rating-c-plus",
-  "C": "bg-rating-c",
-  "D": "bg-rating-d",
-};
 
 const PortfolioHoldingsTable: React.FC<PortfolioHoldingsTableProps> = ({
   activePortfolioName,
@@ -36,168 +27,219 @@ const PortfolioHoldingsTable: React.FC<PortfolioHoldingsTableProps> = ({
   onSaveEdit,
   onCancelEdit,
 }) => {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-      {/* Table Header */}
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">Holdings</h2>
-          <p className="text-sm text-slate-500">
-            {currentHoldings.length} companies in &quot;{activePortfolioName}&quot;
-          </p>
-        </div>
-        
-        {currentHoldings.length > 0 && (
-          <div className="flex gap-2">
-            {isEditing ? (
-              <>
-                <button
-                  onClick={onSaveEdit}
-                  className="px-5 py-2.5 bg-green-600 text-white rounded-xl font-medium transition-all duration-200 flex items-center gap-2 hover:bg-green-700 shadow-md"
-                >
-                  <Save className="w-4 h-4" />
-                  Save Changes
-                </button>
-                <button
-                  onClick={onCancelEdit}
-                  className="px-5 py-2.5 border-2 border-slate-200 text-slate-700 rounded-xl font-medium hover:bg-slate-50 transition-all duration-200"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={onEditToggle}
-                className="px-5 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-medium transition-all duration-200 flex items-center gap-2 hover:bg-slate-200"
-              >
-                <Edit className="w-4 h-4" />
-                Edit Allocations
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [isDeleting, setIsDeleting] = React.useState<number | null>(null);
 
-      {/* Table */}
-      {currentHoldings.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  Company
+  // Calculate portfolio totals
+  const calculateTotals = () => {
+    if (currentHoldings.length === 0) {
+      return {
+        totalAUM: '0.00',
+        averageScore: 'N/A',
+        averageRating: 'N/A'
+      };
+    }
+
+    // Calculate total AUM percentage
+    const totalAUM = currentHoldings.reduce((sum, holding) => {
+      return sum + (holding.aum_value ?? 0);
+    }, 0);
+
+    // Calculate weighted average ESG score
+    let weightedScoreSum = 0;
+    let totalWeight = 0;
+
+    currentHoldings.forEach(holding => {
+      const score = Number(holding.esg_composite) || 0;
+      const weight = holding.aum_value ?? 0;
+      
+      if (score > 0 && weight > 0) {
+        weightedScoreSum += score * weight;
+        totalWeight += weight;
+      }
+    });
+
+    const averageScore = totalWeight > 0 
+      ? (weightedScoreSum / totalWeight).toFixed(2)
+      : 'N/A';
+
+    // Determine overall rating based on average score
+    const getOverallRating = (avgScore: number): string => {
+      if (avgScore >= 90) return 'A+';
+      if (avgScore >= 80) return 'A';
+      if (avgScore >= 70) return 'B+';
+      if (avgScore >= 60) return 'B';
+      if (avgScore >= 50) return 'C+';
+      if (avgScore >= 40) return 'C';
+      return 'D';
+    };
+
+    const averageRating = averageScore !== 'N/A' 
+      ? getOverallRating(parseFloat(averageScore))
+      : 'N/A';
+
+    return {
+      totalAUM: totalAUM.toFixed(2),
+      averageScore,
+      averageRating
+    };
+  };
+
+  const totals = calculateTotals();
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSaveEdit();
+    } catch (error) {
+      console.error('Save failed:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (holdingId: number) => {
+    setIsDeleting(holdingId);
+    try {
+      await onRemoveHolding(holdingId);
+    } catch (error) {
+      console.error('Delete failed:', error);
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+  if (currentHoldings.length === 0 && !isEditing) {
+    return (
+      <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 text-center">
+        <h3 className="text-xl font-semibold text-slate-700 mb-2">
+          {activePortfolioName} is Empty
+        </h3>
+        <p className="text-slate-500">
+          Use the form above to add your first company to the portfolio.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-slate-200">
+      <div className="p-4 sm:p-6 flex justify-between items-center border-b border-slate-100">
+        <h2 className="text-2xl font-bold text-slate-800">{activePortfolioName} Holdings</h2>
+        <div className="flex space-x-2">
+          {!isEditing && (
+            <Button variant="outline" onClick={onEditToggle} className="flex items-center">
+              <Edit className="w-4 h-4 mr-2" />
+              Edit AUM
+            </Button>
+          )}
+          {isEditing && (
+            <>
+              <Button onClick={handleSave} disabled={isSaving} className="flex items-center bg-green-600 hover:bg-green-700 text-white">
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+              <Button variant="secondary" onClick={onCancelEdit} disabled={isSaving} className="flex items-center">
+                <X className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+      
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-1/3">
+                Company Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-1/6">
+                ISIN
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider w-1/6">
+                ESG Score
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider w-1/6">
+                ESG Rating
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider w-1/12">
+                AUM %
+              </th>
+              {isEditing && (
+                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider w-1/12">
+                  Action
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  ISIN
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  ESG Score
-                </th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  Rating
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                  Allocation
-                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-slate-200">
+            {currentHoldings.map((holding) => (
+              <tr key={holding.id} className="hover:bg-green-50/50">
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                  {holding.company_name}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                  {holding.isin}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono">
+                  {holding.esg_composite !== null && holding.esg_composite !== undefined 
+                    ? Number(holding.esg_composite).toFixed(2) 
+                    : 'N/A'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                  {holding.esg_rating ?? 'N/A'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                  {isEditing ? (
+                    <Input
+                      type="number"
+                      value={holding.aum_value?.toString() ?? '0'}
+                      onChange={(e) => onAUMChange(holding.id, e.target.value)}
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      className="w-20 text-right p-1 text-sm border-slate-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      disabled={isSaving}
+                    />
+                  ) : (
+                    <span className="font-semibold text-slate-700">
+                      {holding.aum_value !== null ? holding.aum_value.toFixed(2) : '0.00'}%
+                    </span>
+                  )}
+                </td>
                 {isEditing && (
-                  <th className="px-6 py-3 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Action
-                  </th>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <Button
+                      variant="danger"
+                      onClick={() => handleDelete(holding.id)}
+                      disabled={isSaving || isDeleting === holding.id}
+                      className="p-2 h-auto"
+                    >
+                      {isDeleting === holding.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </td>
                 )}
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {currentHoldings.map((holding) => {
-                const score = getEsgCompositeAsNumber(holding.esg_composite);
-                const ratingClass = ratingColors[holding.esg_rating ?? "D"] || ratingColors["D"];
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-                return (
-                  <tr 
-                    key={holding.id} 
-                    className={`transition-colors duration-150 ${
-                      isEditing ? 'hover:bg-blue-50' : 'hover:bg-slate-50'
-                    }`}
-                  >
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-800">{holding.company_name}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <code className="text-xs text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                        {holding.isin}
-                      </code>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="text-sm font-semibold text-slate-800">
-                        {score !== null ? score.toFixed(2) : "N/A"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span 
-                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold text-white ${ratingClass}`}
-                      >
-                        {holding.esg_rating || "N/A"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      {isEditing ? (
-                        <div className="flex justify-end">
-                          <div className="relative w-28">
-                            <input
-                              type="number"
-                              value={
-                                typeof holding.aum_value === "number"
-                                  ? holding.aum_value
-                                  : ""
-                              }
-                              onChange={(e) => onAUMChange(holding.id, e.target.value)}
-                              min="0"
-                              max="100"
-                              step="0.01"
-                              title="Enter the AUM value" // Add a title attribute
-                              placeholder="Enter the AUM value"
-                              className="w-full px-3 py-1.5 pr-8 text-sm border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                              %
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-sm font-semibold text-slate-800">
-                          {typeof holding.aum_value === "number" 
-                            ? holding.aum_value.toFixed(2) 
-                            : "0.00"
-                          }%
-                        </span>
-                      )}
-                    </td>
-                    {isEditing && (
-                      <td className="px-6 py-4 text-center">
-                        <button 
-                          onClick={() => onRemoveHolding(holding.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          type="button"
-                          title="Remove Holding"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="py-16 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 bg-slate-100 rounded-full flex items-center justify-center">
-            <PieChart className="w-8 h-8 text-slate-400" />
-          </div>
-          <h3 className="text-lg font-medium text-slate-800 mb-2">No Holdings Yet</h3>
-          <p className="text-slate-500 mb-6">Start building your portfolio by adding companies above</p>
-        </div>
-      )}
+      <PortfolioTotals 
+        totalAUM={totals.totalAUM}
+        averageScore={totals.averageScore}
+        averageRating={totals.averageRating}
+      />
     </div>
   );
 };

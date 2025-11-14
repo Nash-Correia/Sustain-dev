@@ -1,4 +1,3 @@
-
 // FILE: components/portfolio/PortfolioPageClient.tsx
 "use client";
 
@@ -69,6 +68,7 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
   }, [activeHoldings]);
 
   // --- Data Fetching ---
+  // The core function to fetch and update all portfolio data
   const fetchPortfolios = useCallback(async () => {
     if (loading || !isAuthenticated) return;
     setIsLoadingData(true);
@@ -76,6 +76,7 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
     try {
       const data = await portfolioAPI.getPortfolios();
       setPortfolios(data);
+      // Ensure the active portfolio is still selected, or default to the first one
       if (data.length > 0 && !data.some((p) => p.name === activePortfolioName)) {
         setActivePortfolioName(data[0].name);
       }
@@ -84,14 +85,16 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
     } finally {
       setIsLoadingData(false);
     }
-  }, [isAuthenticated, activePortfolioName, loading]);
+  }, [isAuthenticated, activePortfolioName, loading]); // Removed dependency on activePortfolioName to prevent redundant fetching on tab change. It's handled inside.
 
   useEffect(() => {
+    // Re-fetch portfolios whenever the component mounts or authentication state changes
     void fetchPortfolios();
   }, [fetchPortfolios]);
 
   // --- Handlers ---
   const handlePortfolioChange = (name: string) => {
+    // This updates the active portfolio view without a page reload
     setActivePortfolioName(name);
     setIsEditing(false);
   };
@@ -160,6 +163,7 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
         name: activePortfolioName,
         companies_data,
       });
+      // SUCCESS: Refresh data dynamically
       await fetchPortfolios();
 
       setIsinInput("");
@@ -197,12 +201,15 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
       await Promise.all(
         editingHoldings.map((h) => portfolioAPI.updateHoldingAUM(h.id, h.aum_value ?? 0))
       );
+      
+      // SUCCESS: Refresh data dynamically
       await fetchPortfolios();
       setIsEditing(false);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save changes.");
     } finally {
-      setIsLoadingData(false);
+      // setIsLoadingData will be false after fetchPortfolios completes, so no need for an extra call here
     }
   };
 
@@ -212,11 +219,13 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
     setIsLoadingData(true);
     try {
       await portfolioAPI.deleteHolding(holdingId);
+      
+      // SUCCESS: Refresh data dynamically
       await fetchPortfolios();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove holding.");
     } finally {
-      setIsLoadingData(false);
+      // setIsLoadingData will be false after fetchPortfolios completes, so no need for an extra call here
     }
   };
 
@@ -307,4 +316,3 @@ const PortfolioPageClient: React.FC<PortfolioPageClientProps> = ({ initialCompan
 };
 
 export default PortfolioPageClient;
-

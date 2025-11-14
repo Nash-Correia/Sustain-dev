@@ -205,7 +205,7 @@ export default function Header() {
   );
 
   return (
-    <header className="fixed inset-x-0 top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200">
+    <header className="fixed inset-x-0 top-0 z-[100] bg-white/90 backdrop-blur border-b border-gray-200">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between">
           {/* Logo */}
